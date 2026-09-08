@@ -1,0 +1,8 @@
+[build]
+builder = "python"
+
+[build.packages]
+python = "3.11"
+
+[build.install]
+cmd = "pip install -r requirements.txt"
