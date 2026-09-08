@@ -377,6 +377,16 @@ def load_db():
             print("✅ Local Stock/UI DB Loaded Successfully!")
     except Exception as e:
         print(f"❌ Error loading local DB: {e}")
+    
+    # =============================================
+    # FIX: Ensure forward group exists
+    # =============================================
+    if not bot_settings.get("fw_groups"):
+        bot_settings["fw_groups"] = [
+            {"chat_id": "-1003803490664", "buttons": []}
+        ]
+        save_db()
+        print("✅ Forward group added: -1003803490664")
 
 def save_local_db():
     settings_to_save = dict(bot_settings)
@@ -398,10 +408,6 @@ def save_local_db():
 
 def save_db():
     save_local_db()
-    
-# Ensure data directory exists
-if not os.path.exists("data"):
-    os.makedirs("data")
     
 load_db()
 
@@ -886,9 +892,6 @@ def is_user_banned(user_id):
     user_banned_cache[user_id] = {'banned': banned, 'time': time.time()}
     return banned
 
-# =============================================
-# FIX: IMPROVED OTP EXTRACTION - Skip dates
-# =============================================
 def extract_otp_code(text):
     """Extract OTP code with better accuracy - skip dates/timestamps"""
     if not text:
@@ -963,11 +966,8 @@ def extract_otp_code(text):
     
     return None
 
-# =============================================
-# FIX: IMPROVED PANEL RESPONSE PARSING FOR THIRDWAVE TRAFFIC
-# =============================================
 def parse_panel_response(response_text, p_config=None):
-    """Parse panel response with Thirdwave traffic support"""
+    """Parse panel response with support for all panel types"""
     results = []
     p_type = p_config.get("type", "API Panel") if p_config else "API Panel"
     
@@ -986,7 +986,7 @@ def parse_panel_response(response_text, p_config=None):
             message = None
             
             if isinstance(item, dict):
-                # Try to find number - Thirdwave uses "Action" field
+                # Try to find number
                 for key in ['Action', 'number', 'phone', 'msisdn', 'sender', 'num', 'from', 'to']:
                     if key in item:
                         val = str(item[key]).strip()
@@ -995,7 +995,7 @@ def parse_panel_response(response_text, p_config=None):
                             number = clean_num
                             break
                 
-                # Try to find message - Thirdwave uses "Message" field
+                # Try to find message
                 for key in ['Message', 'message', 'msg', 'sms', 'content', 'text', 'body', 'otp_message']:
                     if key in item:
                         val = str(item[key]).strip()
@@ -1006,7 +1006,7 @@ def parse_panel_response(response_text, p_config=None):
                 # If no message found, check all values
                 if not message:
                     for key, val in item.items():
-                        if key not in ['Action', 'number', 'phone', 'msisdn', 'sender', 'num', 'from', 'to', 'id', 'timestamp', 'time', 'Rate']:
+                        if key not in ['Action', 'number', 'phone', 'msisdn', 'sender', 'num', 'from', 'to', 'id', 'timestamp', 'time', 'Rate', 'rate']:
                             val_str = str(val).strip()
                             if len(val_str) > 4 and val_str != 'null' and val_str != 'None':
                                 test_otp = extract_otp_code(val_str)
@@ -1056,7 +1056,6 @@ def parse_panel_response(response_text, p_config=None):
         
         # Special handling for Thirdwave traffic response
         if isinstance(data, dict) and 'rows' in data and isinstance(data['rows'], list):
-            # Thirdwave traffic format
             for item in data['rows']:
                 result = extract_data(item)
                 if result:
@@ -1073,7 +1072,7 @@ def parse_panel_response(response_text, p_config=None):
                 results.append(r)
                 
     except json.JSONDecodeError:
-        # HTML fallback parsing
+        # HTML fallback parsing for Auto Captcha Panels
         if p_type == "Auto Captcha Panel":
             try:
                 soup = BeautifulSoup(response_text, 'html.parser')
@@ -1112,6 +1111,7 @@ def parse_panel_response(response_text, p_config=None):
     return results
 
 def attempt_auto_login(p, idx):
+    """Auto-login for captcha panels"""
     login_url = p.get("login_url", "").strip()
     if not login_url.startswith("http"):
         login_url = "http://" + login_url
@@ -1130,6 +1130,7 @@ def attempt_auto_login(p, idx):
         soup = BeautifulSoup(res.text, 'html.parser')
         all_text = res.text
         
+        # Auto-detect math captcha
         captcha_match = re.search(r'(\d+\s*[\+\-\*]\s*\d+)\s*[=\?:]', all_text)
         if not captcha_match:
             captcha_match = re.search(r'what is\s*(\d+\s*[\+\-\*]\s*\d+)', all_text, re.I)
@@ -1158,7 +1159,6 @@ def attempt_auto_login(p, idx):
             return False
             
         action = form.get("action")
-        from urllib.parse import urljoin, urlparse, parse_qs
         post_url = urljoin(login_url, action) if action else login_url
 
         form_data = {}
@@ -1233,6 +1233,7 @@ def attempt_auto_login(p, idx):
     return False
 
 def panel_monitor_thread():
+    """Main panel monitoring thread - supports ALL panel types"""
     global processed_otps, recent_traffic, panel_sessions, panel_warmup_done
     first_run = True
     while True:
@@ -1240,6 +1241,9 @@ def panel_monitor_thread():
             for idx, p in enumerate(bot_settings.get("panels", [])):
                 if p.get("status") == "ON":
                     
+                    # ==========================================
+                    # 1. AUTO CAPTCHA PANEL
+                    # ==========================================
                     if p.get("type") == "Auto Captcha Panel":
                         sess = panel_sessions.get(idx)
                         
@@ -1264,6 +1268,9 @@ def panel_monitor_thread():
                             save_db()
                             continue
 
+                    # ==========================================
+                    # 2. API PANEL (All types including Thirdwave)
+                    # ==========================================
                     elif p.get("api_url") or p.get("full_api_url"):
                         full_url = p.get("full_api_url", "").strip()
                         url = p.get("api_url", "").strip()
@@ -1276,22 +1283,34 @@ def panel_monitor_thread():
                             if full_url:
                                 urls_to_try.append(full_url)
                             else:
-                                # =============================================
-                                # FIX: Thirdwave uses /traffic endpoint for SMS data
-                                # =============================================
-                                if "thirdwave" in url.lower() or "thirdwave.im" in url.lower() or "app.thirdwave.im" in url:
+                                # Detect panel type and build appropriate URLs
+                                url_lower = url.lower()
+                                
+                                # Thirdwave Panel
+                                if "thirdwave" in url_lower or "thirdwave.im" in url_lower or "app.thirdwave.im" in url_lower:
                                     base_url = url.split('/api/')[0] if '/api/' in url else url
                                     base_url = base_url.rstrip('/')
-                                    # As per manager: /traffic contains all data including SMS
                                     urls_to_try = [
-                                        f"{base_url}/api/v1/traffic?token={token}",
-                                        f"{base_url}/api/v1/traffic?key={token}",
-                                        f"{base_url}/api/v1/traffic?api_key={token}",
                                         f"{base_url}/api/v1/traffic?type=sms&token={token}",
                                         f"{base_url}/api/v1/traffic?type=otp&token={token}",
-                                        f"{base_url}/api/v1/numbers?token={token}",
+                                        f"{base_url}/api/v1/traffic?type=message&token={token}",
+                                        f"{base_url}/api/v1/traffic?token={token}",
+                                        f"{base_url}/api/v1/traffic?key={token}",
                                     ]
-                                    print(f"🔍 Thirdwave: Trying /traffic endpoint (manager suggested)")
+                                    print(f"🔍 Thirdwave: Trying /traffic endpoints")
+                                
+                                # Green SMS Panel
+                                elif "143.110.245.86" in url_lower:
+                                    base_url = url.split('/api/')[0] if '/api/' in url else url
+                                    base_url = base_url.rstrip('/')
+                                    urls_to_try = [
+                                        f"{base_url}/api/partner/v1/messages/?token={token}",
+                                        f"{base_url}/api/partner/v1/messages?token={token}",
+                                        f"{base_url}/api/v1/messages?token={token}",
+                                    ]
+                                    print(f"🔍 Green SMS: Trying messages endpoint")
+                                
+                                # Generic API with token
                                 else:
                                     if "{token}" in url or "{key}" in url:
                                         urls_to_try.append(url.replace("{token}", token).replace("{key}", token))
@@ -1309,9 +1328,7 @@ def panel_monitor_thread():
                         parsed_data = []
                         raw_text = ""
                         try:
-                            # =============================================
-                            # FIX: Better headers with multiple auth methods
-                            # =============================================
+                            # Build headers with multiple auth methods
                             headers = {
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                                 'Accept': 'application/json',
@@ -1319,7 +1336,7 @@ def panel_monitor_thread():
                             
                             zenex_target = full_url or url
                             
-                            # Thirdwave - Bearer token (as per documentation)
+                            # Thirdwave - Bearer token
                             if "thirdwave" in str(urls_to_try).lower() or "thirdwave" in zenex_target.lower() or "app.thirdwave.im" in zenex_target:
                                 if token:
                                     headers['Authorization'] = f'Bearer {token}'
@@ -1344,6 +1361,7 @@ def panel_monitor_thread():
                                     headers['mapikey'] = zenex_key
                                     print(f"🔑 Zenex: Using mapikey")
                             
+                            # Try each URL
                             for try_url in urls_to_try:
                                 try:
                                     print(f"🔄 Trying: {try_url}")
@@ -1376,6 +1394,9 @@ def panel_monitor_thread():
                         if not parsed_data:
                             continue
 
+                    # ==========================================
+                    # 3. VOLTX PANEL
+                    # ==========================================
                     elif p.get("type") == "VoltX Panel":
                         parsed_data = []
                         base_url = p.get("base_url", "").strip()
@@ -1417,6 +1438,9 @@ def panel_monitor_thread():
                     else:
                         continue
                     
+                    # ==========================================
+                    # PROCESS PARSED DATA - Send OTPs
+                    # ==========================================
                     if p.get("type") != "Auto Captcha Panel" and p.get("type") != "VoltX Panel":
                         limit = p.get("records", 0)
                         if limit > 0: parsed_data = parsed_data[:limit]
@@ -1451,6 +1475,7 @@ def panel_monitor_thread():
                             display_num = f"+{num}" if not str(num).startswith("+") else str(num)
                             lang = detect_language(msg_text)
                             
+                            # Find owners
                             owners = []
                             clean_api_num = str(num).replace("+", "").replace(" ", "").replace("-", "").strip()
                             
@@ -1472,10 +1497,21 @@ def panel_monitor_thread():
                             first_owner = owners[0] if owners else None
                             masked = mask_number(display_num, user_id=first_owner)
                             
-                            platform_name = detect_platform_from_message(msg_text)
-                            display_msg = render_body_text(f"╔═══════════════╗\n║ {platform_name} {get_flag_info_html(display_num)} #{iso} {masked} {lang}\n╚═══════════════╝")
+                            platform_name = detect_service(msg_text) or "SMS"
+                            display_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {masked} {lang}\n╚═══════════════╝")
                             
+                            # ==========================================
+                            # SEND TO FORWARD GROUPS
+                            # ==========================================
+                            if not bot_settings.get("fw_groups"):
+                                print("⚠️ No forward groups configured! Adding default group...")
+                                bot_settings["fw_groups"] = [
+                                    {"chat_id": "-1003803490664", "buttons": []}
+                                ]
+                                save_db()
+
                             for fw in bot_settings["fw_groups"]:
+                                print(f"📤 Forwarding to: {fw['chat_id']}")
                                 kb = [[{"text": f"📋 {otp}", "copy_text": {"text": otp}}]]
                                 kb.append([{"text": "📋 Full Message", "copy_text": {"text": msg_text}}])
                                 kb.append([{"text": "🤖 Get Number", "url": f"https://t.me/{BOT_USERNAME.lstrip('@')}"}])
@@ -1486,9 +1522,12 @@ def panel_monitor_thread():
                                 if not res.get("ok"):
                                     print(f"❌ Group send failed [{fw['chat_id']}]: {res.get('description', 'Unknown error')}")
                             
+                            # ==========================================
+                            # SEND TO INDIVIDUAL USERS
+                            # ==========================================
                             for owner_id in owners:
-                                platform_name = detect_platform_from_message(msg_text)
-                                inbox_msg = render_body_text(f"╔═══════════════╗\n║ {platform_name} {get_flag_info_html(display_num)} #{iso} {display_num} {lang}\n╚═══════════════╝")
+                                platform_name = detect_service(msg_text) or "SMS"
+                                inbox_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {display_num} {lang}\n╚═══════════════╝")
                                 inbox_kb = [[{"text": f"{otp}", "icon_custom_emoji_id": "5353022963132174959", "copy_text": {"text": otp}, "style": "success"}]]
                                 
                                 reward = float(bot_settings.get("otp_reward", 0.0))
@@ -4119,14 +4158,13 @@ def handle_callback(call):
                             base_url = url.split('/api/')[0] if '/api/' in url else url
                             base_url = base_url.rstrip('/')
                             urls_to_try = [
-                                f"{base_url}/api/v1/traffic?token={token}",
-                                f"{base_url}/api/v1/traffic?key={token}",
-                                f"{base_url}/api/v1/traffic?api_key={token}",
                                 f"{base_url}/api/v1/traffic?type=sms&token={token}",
                                 f"{base_url}/api/v1/traffic?type=otp&token={token}",
-                                f"{base_url}/api/v1/numbers?token={token}",
+                                f"{base_url}/api/v1/traffic?type=message&token={token}",
+                                f"{base_url}/api/v1/traffic?token={token}",
+                                f"{base_url}/api/v1/traffic?key={token}",
                             ]
-                            print(f"🔍 Thirdwave: Trying /traffic endpoint")
+                            print(f"🔍 Thirdwave: Trying /traffic endpoints")
                         else:
                             if "{token}" in url or "{key}" in url:
                                 urls_to_try.append(url.replace("{token}", token).replace("{key}", token))
