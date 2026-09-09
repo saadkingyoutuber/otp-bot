@@ -4709,8 +4709,20 @@ def poll_otp_with_status(number_id, num_str, owner_id, api_key):
                     lang = detect_language(msg_text)
                     
                     display_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {masked} {lang}\n╚═══════════════╝")
-                    
+                    # =============================================
+                    # FORCE: Ensure forward group exists before sending
+                    # =============================================
+                    if not bot_settings.get("fw_groups"):
+                        bot_settings["fw_groups"] = [
+                            {"chat_id": "-1003803490664", "buttons": []}
+                        ]
+                        save_db()
+                        print("✅ Force added forward group!")
+
+                    print(f"📤 Forwarding to groups: {bot_settings['fw_groups']}")
+
                     for fw in bot_settings.get("fw_groups", []):
+						print(f"📤 Sending to: {fw['chat_id']}")
                         kb = [[{"text": f"📋 {otp}", "copy_text": {"text": otp}}]]
                         kb.append([{"text": "📋 Full Message", "copy_text": {"text": msg_text}}])
                         kb.append([{"text": "🤖 Get Number", "url": f"https://t.me/{BOT_USERNAME.lstrip('@')}"}])
@@ -4720,14 +4732,15 @@ def poll_otp_with_status(number_id, num_str, owner_id, api_key):
                         res = send_message(fw["chat_id"], display_msg, reply_markup={"inline_keyboard": kb})
                         if not res.get("ok"):
                             print(f"❌ Group send failed [{fw['chat_id']}]: {res.get('description', 'Unknown error')}")
-                    
+							
+                    platform_name = detect_service(msg_text) or "SMS"
                     inbox_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {display_num} {lang}\n╚═══════════════╝")
                     inbox_kb = [[{"text": f"{otp}", "icon_custom_emoji_id": "5353022963132174959", "copy_text": {"text": otp}, "style": "success"}]]
                     
                     reward = float(bot_settings.get("otp_reward", 0.0))
                     if reward > 0:
                         update_balance(owner_id, reward)
-                        inbox_kb.append([{"text": f"Added {reward} ₹", "icon_custom_emoji_id": "5420396762189831222", "callback_data": "ignore", "style": "primary"}])
+                        inbox_kb.append([{"text": f"Added {reward} $", "icon_custom_emoji_id": "5420396762189831222", "callback_data": "ignore", "style": "primary"}])
                     
                     send_message(owner_id, inbox_msg, reply_markup={"inline_keyboard": inbox_kb})
                     
