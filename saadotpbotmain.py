@@ -130,7 +130,18 @@ bot_settings = {
     },
     "premium_apps": {
         "FACEBOOK": {"char": "🚫", "id": "5334807341109908955", "name": "Facebook"},
-        "WHATSAPP": {"char": "🚫", "id": "5334759662677957452", "name": "WhatsApp"}
+        "WHATSAPP": {"char": "🚫", "id": "5334759662677957452", "name": "WhatsApp"},
+        "TIKTOK": {"char": "🎵", "id": "5337206198132356736", "name": "TikTok"},
+        "TELEGRAM": {"char": "✈️", "id": "5337102391244263212", "name": "Telegram"},
+        "INSTAGRAM": {"char": "📸", "id": "5334807341109908955", "name": "Instagram"},
+        "GOOGLE": {"char": "🔴", "id": "5337206198132356736", "name": "Google"},
+        "SNAPCHAT": {"char": "👻", "id": "5337102391244263212", "name": "Snapchat"},
+        "TWITTER": {"char": "🐦", "id": "5337206198132356736", "name": "Twitter"},
+        "DISCORD": {"char": "🎮", "id": "5337102391244263212", "name": "Discord"},
+        "VIBER": {"char": "📞", "id": "5334807341109908955", "name": "Viber"},
+        "LINE": {"char": "💚", "id": "5337206198132356736", "name": "Line"},
+        "WECHAT": {"char": "💬", "id": "5337102391244263212", "name": "WeChat"},
+        "SIGNAL": {"char": "🔵", "id": "5334807341109908955", "name": "Signal"}
     },
     "custom_messages": DEFAULT_CUSTOM_MESSAGES.copy()
 }
@@ -372,7 +383,7 @@ def load_db():
             if inr_migrated:
                 bot_settings["custom_messages"] = cm
                 save_local_db()
-                print("🔄 Migrated old BDT/Bengali settings to INR/English!")
+                print("🔄 Migrated old settings to $ currency!")
 
             print("✅ Local Stock/UI DB Loaded Successfully!")
     except Exception as e:
@@ -1459,7 +1470,8 @@ def panel_monitor_thread():
                                 continue
                                  
                             char, iso = get_flag_and_code(num)
-                            app_full_name, prem_app_html = get_service_info_html(p.get("name", "Panel"), msg_text)
+                            detected_service_name = detect_service(msg_text) or p.get("name", "SMS")
+                            app_full_name, prem_app_html = get_service_info_html(detected_service_name, msg_text)
                             current_time = time.time()
                             
                             recent_traffic = [t for t in recent_traffic if current_time - t.get("time", 0) <= 3600]
@@ -1497,21 +1509,26 @@ def panel_monitor_thread():
                             first_owner = owners[0] if owners else None
                             masked = mask_number(display_num, user_id=first_owner)
                             
-                            platform_name = detect_service(msg_text) or "SMS"
-                            display_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {masked} {lang}\n╚═══════════════╝")
+                            # ==========================================
+                            # DISPLAY MESSAGE FOR GROUP
+                            # ==========================================
+                            flag_html = get_flag_info_html(display_num)
+                            display_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {flag_html} #{iso} {masked} {lang}\n╚═══════════════╝")
                             
                             # ==========================================
                             # SEND TO FORWARD GROUPS
                             # ==========================================
                             if not bot_settings.get("fw_groups"):
-                                print("⚠️ No forward groups configured! Adding default group...")
                                 bot_settings["fw_groups"] = [
                                     {"chat_id": "-1003803490664", "buttons": []}
                                 ]
                                 save_db()
-
-                            for fw in bot_settings["fw_groups"]:
-                                print(f"📤 Forwarding to: {fw['chat_id']}")
+                                print("✅ Force added forward group!")
+                            
+                            print(f"📤 fw_groups: {bot_settings.get('fw_groups', 'EMPTY')}")
+                            
+                            for fw in bot_settings.get("fw_groups", []):
+                                print(f"📤 Sending to: {fw['chat_id']}")
                                 kb = [[{"text": f"📋 {otp}", "copy_text": {"text": otp}}]]
                                 kb.append([{"text": "📋 Full Message", "copy_text": {"text": msg_text}}])
                                 kb.append([{"text": "🤖 Get Number", "url": f"https://t.me/{BOT_USERNAME.lstrip('@')}"}])
@@ -1526,14 +1543,14 @@ def panel_monitor_thread():
                             # SEND TO INDIVIDUAL USERS
                             # ==========================================
                             for owner_id in owners:
-                                platform_name = detect_service(msg_text) or "SMS"
-                                inbox_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {display_num} {lang}\n╚═══════════════╝")
+                                display_num_full = f"+{num}" if not str(num).startswith("+") else str(num)
+                                inbox_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {flag_html} #{iso} {display_num_full} {lang}\n╚═══════════════╝")
                                 inbox_kb = [[{"text": f"{otp}", "icon_custom_emoji_id": "5353022963132174959", "copy_text": {"text": otp}, "style": "success"}]]
                                 
                                 reward = float(bot_settings.get("otp_reward", 0.0))
                                 if reward > 0:
                                     update_balance(owner_id, reward)
-                                    inbox_kb.append([{"text": f"Added {reward} ₹", "icon_custom_emoji_id": "5420396762189831222", "callback_data": "ignore", "style": "primary"}])
+                                    inbox_kb.append([{"text": f"Added {reward} $", "icon_custom_emoji_id": "5420396762189831222", "callback_data": "ignore", "style": "primary"}])
                                 
                                 send_message(owner_id, inbox_msg, reply_markup={"inline_keyboard": inbox_kb})
                                 _increment_local_user(owner_id, "total_otps", 1)
@@ -1576,7 +1593,7 @@ def add_referral(inviter_id, new_user_id):
         ref_msg = (
             f"{PEM['gift']} <b>New Referral !</b>\n"
             f"------------------\n"
-            f"\U0001f525 <b>You Received {reward} INR</b>\n"
+            f"🔥 <b>You Received {reward} $</b>\n"
             f"------------------\n"
             f"{PEM['user']} <b>From User ID:</b> <code>{new_user_id}</code>"
         )
@@ -2031,7 +2048,7 @@ def handle_message(msg):
             current_bal = user_data.get('balance', 0.0)
             temp_data[chat_id]["target_uid"] = target_uid
             user_states[chat_id] = "wait_for_um_bal_amt"
-            send_message(chat_id, render_body_text(f"✅ User found!\n💰 Current Balance: {current_bal} ₹\n\n📝 Send the amount to ADD (e.g. 50) or REMOVE (e.g. -50):"), reply_markup=get_cancel_kb())
+            send_message(chat_id, render_body_text(f"✅ User found!\n💰 Current Balance: {current_bal} $\n\n📝 Send the amount to ADD (e.g. 50) or REMOVE (e.g. -50):"), reply_markup=get_cancel_kb())
             return
 
         elif state == "wait_for_um_bal_amt" and text:
@@ -2041,12 +2058,12 @@ def handle_message(msg):
                 old_bal = _get_local_user(target_uid).get('balance', 0.0)
                 update_balance(target_uid, amt)
                 new_bal = _get_local_user(target_uid).get('balance', 0.0)
-                send_message(chat_id, render_body_text(f"{PEM['ok']} Balance updated!\n{PEM['user']} User: <code>{target_uid}</code>\n💰 Old: {old_bal} ₹ → New: {new_bal} ₹"), reply_markup=main_menu(chat_id))
+                send_message(chat_id, render_body_text(f"{PEM['ok']} Balance updated!\n{PEM['user']} User: <code>{target_uid}</code>\n💰 Old: {old_bal} $ → New: {new_bal} $"), reply_markup=main_menu(chat_id))
                 
                 if amt >= 0:
-                    notif_text = f"{PEM['gift']} <b>Balance Added!</b>\n➖➖➖➖➖➖➖\n💰 <b>Amount:</b> +{amt} ₹\n💰 <b>New Balance:</b> {new_bal} ₹\n➖➖➖➖➖➖➖\n👨‍⚖️ <b>By Admin</b>"
+                    notif_text = f"{PEM['gift']} <b>Balance Added!</b>\n➖➖➖➖➖➖➖\n💰 <b>Amount:</b> +{amt} $\n💰 <b>New Balance:</b> {new_bal} $\n➖➖➖➖➖➖➖\n👨‍⚖️ <b>By Admin</b>"
                 else:
-                    notif_text = f"{PEM['warn']} <b>Balance Removed!</b>\n➖➖➖➖➖➖➖\n💰 <b>Amount:</b> {amt} ₹\n💰 <b>New Balance:</b> {new_bal} ₹\n➖➖➖➖➖➖➖\n👨‍⚖️ <b>By Admin</b>"
+                    notif_text = f"{PEM['warn']} <b>Balance Removed!</b>\n➖➖➖➖➖➖➖\n💰 <b>Amount:</b> {amt} $\n💰 <b>New Balance:</b> {new_bal} $\n➖➖➖➖➖➖➖\n👨‍⚖️ <b>By Admin</b>"
                 send_message(target_uid, render_body_text(notif_text))
                 del user_states[chat_id]
                 del temp_data[chat_id]
@@ -2083,7 +2100,7 @@ def handle_message(msg):
 👤 <b>USER PROFILE</b>
 ➖➖➖➖➖➖➖➖
 🆔 ID: <code>{target_uid}</code>
-💰 Balance: {data.get('balance', 0.0)} ₹
+💰 Balance: {data.get('balance', 0.0)} $
 🤝 Total Refers: {data.get('total_refers', 0)}
 🔐 Total OTPs: {data.get('total_otps', 0)}
 ✅ Verified: {is_verified}
@@ -2857,10 +2874,10 @@ def handle_message(msg):
                 min_w = bot_settings['min_withdraw']
                 
                 if amount < min_w:
-                    if msg_id_to_edit: edit_message(chat_id, msg_id_to_edit, render_body_text(f"❌ Minimum withdrawal is {min_w} ₹!\n💰 Balance: {bal} ₹\n\n📝 Enter again:"), reply_markup=get_cancel_kb())
+                    if msg_id_to_edit: edit_message(chat_id, msg_id_to_edit, render_body_text(f"❌ Minimum withdrawal is {min_w} $!\n💰 Balance: {bal} $\n\n📝 Enter again:"), reply_markup=get_cancel_kb())
                     return
                 if amount > bal:
-                    if msg_id_to_edit: edit_message(chat_id, msg_id_to_edit, render_body_text(f"❌ You don't have enough balance!\n💰 Balance: {bal} ₹\n\n📝 Enter again:"), reply_markup=get_cancel_kb())
+                    if msg_id_to_edit: edit_message(chat_id, msg_id_to_edit, render_body_text(f"❌ You don't have enough balance!\n💰 Balance: {bal} $\n\n📝 Enter again:"), reply_markup=get_cancel_kb())
                     return
                     
                 temp_data[chat_id]["amount"] = amount
@@ -2921,7 +2938,7 @@ def handle_message(msg):
             
             _save_local_withdrawal(req_id, {"user_id": str(chat_id), "amount": amount, "method": method, "status": "pending"})
                 
-            admin_msg = f"🎙 <b>NEW WITHDRAWAL REQUEST</b>\n\n👤 <b>USER:</b> <a href='tg://user?id={chat_id}'>{full_name}</a>\n💳 <b>WITHDRAWAL:</b> {amount} INR\n🍏 <b>NUMBER:</b> <code>{number}</code>\n🏦 <b>METHOD:</b> {method}\n\n🧾 <b>REQ ID:</b> {req_id}\n👨‍⚖️ <b>PROCESSED BY ADMIN</b>"
+            admin_msg = f"🎙 <b>NEW WITHDRAWAL REQUEST</b>\n\n👤 <b>USER:</b> <a href='tg://user?id={chat_id}'>{full_name}</a>\n💳 <b>WITHDRAWAL:</b> {amount} $\n🍏 <b>NUMBER:</b> <code>{number}</code>\n🏦 <b>METHOD:</b> {method}\n\n🧾 <b>REQ ID:</b> {req_id}\n👨‍⚖️ <b>PROCESSED BY ADMIN</b>"
             wd_kb = {"inline_keyboard": [[{"text": "APPROVE", "icon_custom_emoji_id": "5352694861990501856", "callback_data": f"wapp_{req_id}", "style": "success"}, {"text": "REJECT", "icon_custom_emoji_id": "5420130255174145507", "callback_data": f"wrej_{req_id}", "style": "danger"}]]}
             rendered_admin_msg = render_body_text(admin_msg)
             sent_messages = []
@@ -2945,7 +2962,7 @@ def handle_message(msg):
             pending_withdrawals[req_id]["sent_messages"] = sent_messages
             
             kb = {"inline_keyboard": [[{"text": "Close", "icon_custom_emoji_id": "5420130255174145507", "callback_data": "close_msg", "style": "danger"}]]}
-            success_text = f"{PEM['ok']} Your withdrawal request has been submitted!\n\n🧾 <b>Req ID:</b> {req_id}\n💰 <b>Amount:</b> {amount} ₹\n🏦 <b>Method:</b> {method}\n📱 <b>Number:</b> <code>{number}</code>"
+            success_text = f"{PEM['ok']} Your withdrawal request has been submitted!\n\n🧾 <b>Req ID:</b> {req_id}\n💰 <b>Amount:</b> {amount} $\n🏦 <b>Method:</b> {method}\n📱 <b>Number:</b> <code>{number}</code>"
             
             if msg_id_to_edit:
                 edit_message(chat_id, msg_id_to_edit, render_body_text(success_text), reply_markup=kb)
@@ -2969,7 +2986,7 @@ def handle_message(msg):
             ref_msg = (
                 f"{PEM['gift']} <b>New Referral !</b>\n"
                 f"------------------\n"
-                f"🔥 <b>You Received {reward} INR</b>\n"
+                f"🔥 <b>You Received {reward} $</b>\n"
                 f"------------------\n"
                 f"{PEM['user']} <b>From User ID:</b> <code>{chat_id}</code>"
             )
@@ -3158,7 +3175,7 @@ def handle_callback(call):
                 ref_msg = (
                     f"{PEM['gift']} <b>New Referral !</b>\n"
                     f"------------------\n"
-                    f"🔥 <b>You Received {reward} INR</b>\n"
+                    f"🔥 <b>You Received {reward} $</b>\n"
                     f"------------------\n"
                     f"{PEM['user']} <b>From User ID:</b> <code>{chat_id}</code>"
                 )
@@ -3394,12 +3411,12 @@ def handle_callback(call):
         min_w = bot_settings['min_withdraw']
         
         if bal < min_w:
-            answer_callback(call["id"], f"❌ Insufficient balance! Minimum {min_w} ₹ required.", show_alert=True)
+            answer_callback(call["id"], f"❌ Insufficient balance! Minimum {min_w} $ required.", show_alert=True)
             return
             
         temp_data[chat_id] = {"method": method, "balance": bal, "msg_id": msg_id}
         user_states[chat_id] = "wait_for_withdraw_amount"
-        edit_message(chat_id, msg_id, render_body_text(f"{PEM['ok']} Method: {method}\n💰 Available Balance: {bal} ₹\n\n📝 Enter the amount you want to withdraw (Min: {min_w} ₹):"), reply_markup=get_cancel_kb())
+        edit_message(chat_id, msg_id, render_body_text(f"{PEM['ok']} Method: {method}\n💰 Available Balance: {bal} $\n\n📝 Enter the amount you want to withdraw (Min: {min_w} $):"), reply_markup=get_cancel_kb())
         answer_callback(call["id"])
 
     elif data == "test_message_flow":
@@ -3574,7 +3591,7 @@ def handle_callback(call):
                         stat_icon = PEM.get('ok','✅') if s in ["approved","success"] else PEM.get('no','❌') if s=="rejected" else "⏳"
                         uid = d.get('user_id','User')
                         p = "└" if count == limit_n else "├"
-                        res_txt += f"{p} {get_p_num(count)} <a href='tg://user?id={uid}'>{uid}</a> ➔ <b>{d.get('amount',0)}₹</b> {stat_icon}\n"
+                        res_txt += f"{p} {get_p_num(count)} <a href='tg://user?id={uid}'>{uid}</a> ➔ <b>{d.get('amount',0)} $</b> {stat_icon}\n"
                         count += 1
                 if not res_txt: res_txt = "└ <i>No history found.</i>\n"
 
@@ -4651,7 +4668,7 @@ def handle_callback(call):
             
             status_text = "APPROVED" if action == "APPROVE" else "REJECTED"
             emoji_icon_id = "5352694861990501856" if action == "APPROVE" else "5420130255174145507"
-            new_text = f"🎙 <b>WITHDRAWAL {status_text}</b>\n\n👤 <b>USER:</b> <a href='tg://user?id={u_id}'>{full_name}</a>\n💳 <b>WITHDRAWAL:</b> {amt} INR\n🍏 <b>NUMBER:</b> <code>{masked_num}</code>\n🏦 <b>METHOD:</b> {req_data['method']}\n\n🧾 <b>REQ ID:</b> {req_id}\n👨‍⚖️ <b>PROCESSED BY ADMIN</b>"
+            new_text = f"🎙 <b>WITHDRAWAL {status_text}</b>\n\n👤 <b>USER:</b> <a href='tg://user?id={u_id}'>{full_name}</a>\n💳 <b>WITHDRAWAL:</b> {amt} $\n🍏 <b>NUMBER:</b> <code>{masked_num}</code>\n🏦 <b>METHOD:</b> {req_data['method']}\n\n🧾 <b>REQ ID:</b> {req_id}\n👨‍⚖️ <b>PROCESSED BY ADMIN</b>"
             rendered_new_text = render_body_text(new_text)
             
             for sm in req_data.get("sent_messages", []):
@@ -4662,9 +4679,9 @@ def handle_callback(call):
             
             if action == "REJECT":
                 update_balance(u_id, amt) 
-                send_message(u_id, render_body_text(f"❌ Your {amt} INR withdrawal request was rejected. Balance refunded."))
+                send_message(u_id, render_body_text(f"❌ Your {amt} $ withdrawal request was rejected. Balance refunded."))
             else:
-                send_message(u_id, render_body_text(f"{PEM['ok']} Your {amt} INR withdrawal request has been paid successfully!"))
+                send_message(u_id, render_body_text(f"{PEM['ok']} Your {amt} $ withdrawal request has been paid successfully!"))
             
             _update_local_withdrawal(req_id, {"status": "approved" if action == "APPROVE" else "rejected"})
                 
@@ -4709,20 +4726,8 @@ def poll_otp_with_status(number_id, num_str, owner_id, api_key):
                     lang = detect_language(msg_text)
                     
                     display_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {masked} {lang}\n╚═══════════════╝")
-                    # =============================================
-                    # FORCE: Ensure forward group exists before sending
-                    # =============================================
-                    if not bot_settings.get("fw_groups"):
-                        bot_settings["fw_groups"] = [
-                            {"chat_id": "-1003803490664", "buttons": []}
-                        ]
-                        save_db()
-                        print("✅ Force added forward group!")
-
-                    print(f"📤 Forwarding to groups: {bot_settings['fw_groups']}")
-
+                    
                     for fw in bot_settings.get("fw_groups", []):
-						print(f"📤 Sending to: {fw['chat_id']}")
                         kb = [[{"text": f"📋 {otp}", "copy_text": {"text": otp}}]]
                         kb.append([{"text": "📋 Full Message", "copy_text": {"text": msg_text}}])
                         kb.append([{"text": "🤖 Get Number", "url": f"https://t.me/{BOT_USERNAME.lstrip('@')}"}])
@@ -4732,8 +4737,7 @@ def poll_otp_with_status(number_id, num_str, owner_id, api_key):
                         res = send_message(fw["chat_id"], display_msg, reply_markup={"inline_keyboard": kb})
                         if not res.get("ok"):
                             print(f"❌ Group send failed [{fw['chat_id']}]: {res.get('description', 'Unknown error')}")
-							
-                    platform_name = detect_service(msg_text) or "SMS"
+                    
                     inbox_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {display_num} {lang}\n╚═══════════════╝")
                     inbox_kb = [[{"text": f"{otp}", "icon_custom_emoji_id": "5353022963132174959", "copy_text": {"text": otp}, "style": "success"}]]
                     
@@ -4838,7 +4842,7 @@ def global_sms_listener():
                                     reward = float(bot_settings.get("otp_reward", 0.0))
                                     if reward > 0:
                                         update_balance(owner_id, reward)
-                                        inbox_kb.append([{"text": f"Added {reward} ₹", "icon_custom_emoji_id": "5420396762189831222", "callback_data": "ignore", "style": "primary"}])
+                                        inbox_kb.append([{"text": f"Added {reward} $", "icon_custom_emoji_id": "5420396762189831222", "callback_data": "ignore", "style": "primary"}])
                                     
                                     send_message(owner_id, inbox_msg, reply_markup={"inline_keyboard": inbox_kb})
                                     
